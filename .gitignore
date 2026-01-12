@@ -17,3 +17,9 @@ your_submission/test_data/
 your_submission/model/*.pt
 
 
+ViT/260112/.venv/
+ViT/260112/test_data/
+ViT/260112/train_image/
+ViT/260112/train_video/
+ViT/260112/train_data/
+ViT/260112/model/*.pt
