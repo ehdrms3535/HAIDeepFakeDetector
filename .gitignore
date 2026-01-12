@@ -11,3 +11,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+your_submission/train_data/
+your_submission/test_data/
+your_submission/model/
+
+
