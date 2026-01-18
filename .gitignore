@@ -1,5 +1,6 @@
 # Python virtual environment
 .venv/
+venv/
 
 # Python cache
 __pycache__/
@@ -12,10 +13,41 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Models and checkpoints
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+outputs/
+outputs_*/
+
+# Datasets
+dataset/
+train_data/
+test_data/
+train_image/
+train_video/
+
+# Logs
+*.log
+
+# Submissions
+submissions/
+
 your_submission/train_data/
 your_submission/test_data/
 your_submission/model/*.pt
 
+# ConvNeXt specific
+ConvNeXt/checkpoints/
+ConvNeXt/outputs*/
+ConvNeXt/submissions/
+ConvNeXt/venv/
+ConvNeXt/*.log
+ConvNeXt/small_image/
+ConvNeXt/small_video/
+ConvNeXt/pseudo_labeled_data/
+ConvNeXt/open/test_data/
 
 ViT/260112/.venv/
 ViT/260112/test_data/
