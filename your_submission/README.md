@@ -50,3 +50,6 @@ ch.amp.GradScaler('cuda', args...)` instead.
 [7/8] train_loss=0.0768  val_loss=0.7503  val_auc=0.8578
 [8/8] train_loss=0.0478  val_loss=0.7459  val_auc=0.8578
 Done. Final weight: model\model_facecrop.pt
+
+
+C:\Users\Kim\HAI\.venv\Scripts\Activate.ps1

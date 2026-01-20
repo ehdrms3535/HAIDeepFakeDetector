@@ -1,0 +1,214 @@
+1) folds.csv 준비(한 번만)
+1-1. folds.csv가 이미 있으면 “그대로 유지”
+
+Run 비교하려면 folds.csv는 고정해야 함.
+
+새로 만들면 이전 run들과 AUC 비교가 의미 없어짐.
+
+확인
+dir folds*.csv
+
+1-2. folds.csv가 없으면 생성(한 번만)
+
+(너가 이미 만든 스크립트가 make_folds.py라면)
+
+python make_folds.py
+
+
+생성되면 folds.csv가 생김.
+
+2) Run2(JPEG aug) 학습
+2-1. (권장) 이전 ckpt/model 제거하고 “새로 시작”
+
+Run 조건이 바뀌면 resume 하지 말고 새로 시작 추천.
+
+Remove-Item -Force model\ckpt.pt -ErrorAction SilentlyContinue
+Remove-Item -Force model\model.pt -ErrorAction SilentlyContinue
+
+2-2. 학습 실행
+
+너 train.py가 train subcommand를 갖고 있으니 이렇게:
+
+python train.py train `
+  --epochs 6 `
+  --batch_size 16 `
+  --lr 2e-4 `
+  --weight_decay 1e-4 `
+  --warmup_epochs 1 `
+  --train_num_frames 4 `
+  --agg topkmean `
+  --topk_ratio 0.15 `
+  --unfreeze_last_k 1 `
+  --face_crop
+
+설명
+
+--train_num_frames 4 : 속도용(방향성 확인). 점수 괜찮으면 나중에 8로 늘려서 재학습/파인튜닝
+
+--unfreeze_last_k 1 : stage3만 학습(과적합/시간 밸런스 좋음)
+
+출력 중 ✅ saved best -> model\model.pt 뜨면 그게 최종 제출/평가용 가중치
+
+3) Clean AUC 평가(=val 원본 기준)
+
+목표: folds.csv의 val만 예측해서 pred_clean.csv 만들고, merge 후 AUC 확인
+
+3-1. val만 예측 스크립트 사용
+
+네가 방금 겪은 것처럼 train.py로 train_data 전체(140k) 돌리면 망함.
+그래서 folds.csv의 val(11212)만 도는 스크립트로 간다.
+
+(A) 파일이 없다면: infer_folds_swin.py를 만들어두고(내가 준 독립 스크립트)
+
+그 다음 실행:
+
+python infer_folds_swin.py `
+  --folds_csv .\folds.csv `
+  --data_root C:\Users\Kim\HAI\your_submission\train_data `
+  --weights model\model.pt `
+  --out_csv pred_clean.csv `
+  --num_frames 16 `
+  --agg topkmean `
+  --topk_ratio 0.15 `
+  --face_crop `
+  --which_fold val
+
+체크(11212줄 나와야 정상)
+python -c "import pandas as pd; df=pd.read_csv('pred_clean.csv'); print(len(df)); print(df.head())"
+
+3-2. folds + pred merge
+
+너가 이미 쓰는 merge_pred.py가 있다면:
+
+python merge_pred.py `
+  --folds_csv folds.csv `
+  --pred_csv pred_clean.csv `
+  --out_csv folds_with_pred_clean.csv
+
+3-3. Clean AUC 계산
+python score_two.py
+
+4) Hard AUC 평가(=val_hard 열화 기준)
+
+목표: val_hard/에 대해 예측 → merge → hard AUC 확인
+
+4-1. (한 번만) val_hard 생성
+
+이미 있다면 스킵. 없다면:
+
+python eval_auc.py
+
+
+이게 보통:
+
+val_hard 생성
+
+clean AUC 출력
+
+val_hard 경로 출력
+까지 해줌.
+
+4-2. val_hard 예측 생성
+
+val_hard는 폴더라서 “폴더 infer 스크립트”를 쓰면 됨(너가 이미 쓰던 방식 그대로).
+
+예시(네 프로젝트에 infer_folder.py가 있다면):
+
+python infer_folder.py `
+  --root val_hard `
+  --weights model\model.pt `
+  --out_csv pred_hard.csv `
+  --batch_size 64
+
+4-3. hard pred merge
+
+보통 너는 merge_pred_hard.py 같은 걸 쓰고 있었지. 그걸 실행:
+
+python merge_pred_hard.py
+
+
+(결과로 folds_with_pred_hard.csv 같은 파일이 나와야 함)
+
+4-4. Clean/Hard AUC 둘 다 출력
+python score_two.py
+
+
+여기까지 하면 너는 이미 예전처럼
+Clean AUC: ...
+Hard AUC: ...
+이 두 줄이 나와야 정상.
+
+5) 리더보드 제출 파일 생성 (test_data)
+
+이건 train.py infer로 하면 됨(너 코드에 있음).
+
+python train.py infer `
+  --weights model\model.pt `
+  --test_root ..\test_data `
+  --out_csv output\submission.csv `
+  --infer_num_frames 16 `
+  --agg topkmean `
+  --topk_ratio 0.15 `
+  --face_crop
+
+
+생성 확인:
+
+python -c "import pandas as pd; df=pd.read_csv('output/submission.csv'); print(df.head()); print(len(df))"
+
+
+그 다음 그 파일을 업로드해서 리더보드 점수 확인.
+
+6) runs_log.csv 기록(자동)
+
+네가 “자동으로 기록” 원했으니, 가장 단순한 방식:
+
+6-1. log_run.py 만들어두기
+# log_run.py
+import argparse
+from pathlib import Path
+import pandas as pd
+from datetime import datetime
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run_id", required=True)
+    ap.add_argument("--clean_auc", type=float, required=True)
+    ap.add_argument("--hard_auc", type=float, required=True)
+    ap.add_argument("--lb", type=float, required=True)
+    ap.add_argument("--note", default="")
+    ap.add_argument("--out", default="runs_log.csv")
+    args = ap.parse_args()
+
+    row = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "run_id": args.run_id,
+        "clean_auc": args.clean_auc,
+        "hard_auc": args.hard_auc,
+        "lb_score": args.lb,
+        "note": args.note,
+    }
+
+    out = Path(args.out)
+    if out.exists():
+        df = pd.read_csv(out)
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    else:
+        df = pd.DataFrame([row])
+
+    df.to_csv(out, index=False)
+    print("logged ->", out)
+
+if __name__ == "__main__":
+    main()
+
+6-2. 기록 커맨드
+
+(점수/auc는 너가 얻은 값 넣기)
+
+python log_run.py `
+  --run_id run2_jpegaug `
+  --clean_auc 0.99 `
+  --hard_auc 0.97 `
+  --lb 0.84 `
+  --note "jpeg aug p0.7 q25-60, train_frames4"

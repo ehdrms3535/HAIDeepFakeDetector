@@ -16,9 +16,9 @@ NUM_FRAMES = 5
 AGG = "topkmean"   # mean|max|topkmean
 TOPK = 2
 
-TEST_ROOT = Path("./test_data")
+TEST_ROOT = Path("./testing")
 MODEL_PATH = Path("./model/model.pt")
-OUT_CSV = Path("./output/baseline_submission.csv")
+OUT_CSV = Path("./output/baseline_submission_testing.csv")
 OUT_CSV.parent.mkdir(exist_ok=True, parents=True)
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".jfif"}

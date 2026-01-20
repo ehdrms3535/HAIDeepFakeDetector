@@ -56,11 +56,11 @@ GRAD_CLIP = 1.0
 AGG = "topkmean"             # mean|max|topkmean
 TOPK = 2                     # 임시면 2~3
 
-TRAIN_ROOT = Path("./train_data")
-TEST_ROOT = Path("./test_data")
+TRAIN_ROOT = Path("../train_data")
+TEST_ROOT = Path("../test_data")
 
 MODEL_OUT = Path("./model/model.pt")
-OUT_DIR = Path("./output")
+OUT_DIR = Path("../output")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 MODEL_OUT.parent.mkdir(exist_ok=True, parents=True)
 
