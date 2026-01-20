@@ -17,6 +17,7 @@ Thumbs.db
 *.pt
 *.pth
 *.ckpt
+
 *.jpg
 *.png
 *.jpeg
@@ -26,6 +27,7 @@ Thumbs.db
 *.mov
 *.jfif
 *.csv
+
 checkpoints/
 outputs/
 outputs_*/
