@@ -38,12 +38,7 @@ class DeepfakeDataset(Dataset):
         self.image_size = image_size
         self.sample_offset = sample_offset
         self.max_video_samples_per_class = max_video_samples_per_class  # 비디오 샘플 수 저장
-        
-        # 얼굴 검출기
-        if use_face_detection:
-            self.face_detector = FaceDetector()
-        else:
-            self.face_detector = None
+        self.face_detector = None
         
         # 샘플 리스트
         self.samples = []
@@ -110,9 +105,10 @@ class DeepfakeDataset(Dataset):
             
             # 비디오 샘플링 (config에서 설정한 개수만큼)
             if self.max_video_samples_per_class:
-                video_real_files = sorted(video_real_files)
-                video_real_files = video_real_files[:self.max_video_samples_per_class]  # ← config.py의 max_video_samples_per_class 값 사용
-            
+                start = sample_offset
+                end = start + self.max_video_samples_per_class
+                video_real_files = sorted(video_real_files)[start:end]
+
             for file_path in video_real_files:
                 self.samples.append((str(file_path), 0, 'video'))
                 video_real_count += 1
@@ -145,6 +141,12 @@ class DeepfakeDataset(Dataset):
         # 셔플
         random.shuffle(self.samples)
     
+    def _get_face_detector(self):
+        # 워커 프로세스 안에서 최초 1회만 생성
+        if self.face_detector is None and self.use_face_detection:
+            self.face_detector = FaceDetector()
+        return self.face_detector
+
     def __len__(self):
         return len(self.samples)
     
@@ -157,60 +159,55 @@ class DeepfakeDataset(Dataset):
             print(f"Error loading image {path}: {e}")
             return np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
     
-    def extract_frames_from_video(self, path: str) -> List[np.ndarray]:
-        """비디오에서 프레임 추출"""
+    def extract_one_frame_from_video(self, path: str) -> np.ndarray:
         cap = cv2.VideoCapture(path)
-        frames = []
-        
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames == 0:
-            cap.release()
-            return []
-        
-        # 균등 샘플링
-        indices = np.linspace(0, total_frames - 1, self.num_frames_per_video, dtype=int)
-        
-        for idx in indices:
+        try:
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total <= 0:
+                return None
+            idx = random.randint(0, total - 1)
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ret, frame = cap.read()
-            if ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(frame)
-        
-        cap.release()
-        return frames
+            if not ret:
+                return None
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        finally:
+            cap.release()
+
     
     def process_image(self, image: np.ndarray) -> np.ndarray:
-        """이미지 전처리 (얼굴 크롭)"""
-        if self.use_face_detection and self.face_detector:
-            image = self.face_detector.crop_face_with_fallback(
-                image,
-                target_size=(self.image_size, self.image_size)
-            )
-        else:
-            # 중앙 크롭
-            h, w = image.shape[:2]
-            size = min(h, w)
-            y1 = (h - size) // 2
-            x1 = (w - size) // 2
-            image = image[y1:y1+size, x1:x1+size]
-            image = cv2.resize(image, (self.image_size, self.image_size))
-        
+        if self.use_face_detection:
+            fd = self._get_face_detector()
+            if fd is not None:
+                # 현재 image는 RGB임 -> FaceDetector는 BGR 기준이므로 변환
+                bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                bgr = fd.crop_face_with_fallback(
+                    bgr,
+                    target_size=(self.image_size, self.image_size)
+                )
+                image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                return image
+
+        # fallback (기존 유지)
+        h, w = image.shape[:2]
+        size = min(h, w)
+        y1 = (h - size) // 2
+        x1 = (w - size) // 2
+        image = image[y1:y1+size, x1:x1+size]
+        image = cv2.resize(image, (self.image_size, self.image_size))
         return image
+
     
     def __getitem__(self, idx):
         file_path, label, file_type = self.samples[idx]
         
         try:
             if file_type == 'video':
-                # 비디오: 프레임 추출 후 랜덤 선택
-                frames = self.extract_frames_from_video(file_path)
-                if len(frames) == 0:
+                frame = self.extract_one_frame_from_video(file_path)
+                if frame is None:
                     image = np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8)
                 else:
-                    # 랜덤 프레임 선택 (매 epoch마다 다른 프레임)
-                    image = random.choice(frames)
-                    image = self.process_image(image)
+                    image = self.process_image(frame)
             else:
                 # 이미지
                 image = self.load_image(file_path)

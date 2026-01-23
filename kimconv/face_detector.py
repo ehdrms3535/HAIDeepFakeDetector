@@ -9,10 +9,14 @@ class FaceDetector:
     """OpenCV 기반 얼굴 검출"""
     
     def __init__(self):
-        # Haar Cascade 로드
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        )
+        self.face_cascade = None
+
+    def _get_cascade(self):
+        if self.face_cascade is None:
+            self.face_cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            )
+        return self.face_cascade
     
     def detect_face(self, image, margin=0.2):
         """
@@ -30,9 +34,9 @@ class FaceDetector:
         
         # 그레이스케일 변환
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
+        face_cascade = self._get_cascade()
         # 얼굴 검출
-        faces = self.face_cascade.detectMultiScale(
+        faces = face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
             minNeighbors=5,

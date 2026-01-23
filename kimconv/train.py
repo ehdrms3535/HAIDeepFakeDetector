@@ -19,6 +19,8 @@ warnings.filterwarnings('ignore')
 from model import DeepfakeDetector
 from dataset import DeepfakeDataset
 from config import Config
+from torch.utils.data import DataLoader, random_split, Subset
+
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
@@ -69,8 +71,8 @@ def train_epoch(model, loader, criterion, optimizer, scaler, device, config):
     
     pbar = tqdm(loader, desc="Training")
     for images, labels in pbar:
-        images = images.to(device)
-        labels = labels.to(device).unsqueeze(1)
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True).unsqueeze(1)
         
         optimizer.zero_grad()
         
@@ -102,8 +104,9 @@ def validate(model, loader, criterion, device):
     
     with torch.no_grad():
         for images, labels in tqdm(loader, desc="Validation"):
-            images = images.to(device)
-            labels = labels.to(device).unsqueeze(1)
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True).unsqueeze(1)
+
             
             logits = model(images)
             loss = criterion(logits, labels)
@@ -153,7 +156,9 @@ def main():
     
     # 데이터셋 로드
     print("Loading dataset...")
-    full_dataset = DeepfakeDataset(
+    
+    # 변환 적용
+    base = DeepfakeDataset(
         image_real_dir=config.image_real_dir,
         image_fake_dir=config.image_fake_dir,
         video_real_dir=config.video_real_dir,
@@ -163,42 +168,69 @@ def main():
         num_frames_per_video=config.num_frames_per_video,
         image_size=config.image_size,
         max_samples_per_class=config.max_samples_per_class,
-        max_video_samples_per_class=config.max_video_samples_per_class,  # 비디오 샘플 수 전달
+        max_video_samples_per_class=config.max_video_samples_per_class,
         sample_offset=config.sample_offset
     )
-    
-    # Train/Val 분할
-    val_size = int(len(full_dataset) * config.val_split)
-    train_size = len(full_dataset) - val_size
-    train_dataset, val_dataset = random_split(
-        full_dataset,
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(config.seed)
+
+    n = len(base)
+    idx = np.arange(n)
+    rng = np.random.RandomState(config.seed)
+    rng.shuffle(idx)
+
+    val_size = int(n * config.val_split)
+    val_idx = idx[:val_size].tolist()
+    train_idx = idx[val_size:].tolist()
+
+    # 2) train용 dataset (train_transform)
+    train_full = DeepfakeDataset(
+        image_real_dir=config.image_real_dir,
+        image_fake_dir=config.image_fake_dir,
+        video_real_dir=config.video_real_dir,
+        video_fake_dir=config.video_fake_dir,
+        transform=train_transform,          # ★ 여기만 다름
+        use_face_detection=config.face_detection,
+        num_frames_per_video=config.num_frames_per_video,
+        image_size=config.image_size,
+        max_samples_per_class=config.max_samples_per_class,
+        max_video_samples_per_class=config.max_video_samples_per_class,
+        sample_offset=config.sample_offset
     )
-    
-    # 변환 적용
-    train_dataset.dataset.transform = train_transform
-    val_dataset.dataset.transform = val_transform
+
+    # 3) val용 dataset (val_transform)
+    val_full = DeepfakeDataset(
+        image_real_dir=config.image_real_dir,
+        image_fake_dir=config.image_fake_dir,
+        video_real_dir=config.video_real_dir,
+        video_fake_dir=config.video_fake_dir,
+        transform=val_transform,            # ★ 여기만 다름
+        use_face_detection=config.face_detection,
+        num_frames_per_video=config.num_frames_per_video,
+        image_size=config.image_size,
+        max_samples_per_class=config.max_samples_per_class,
+        max_video_samples_per_class=config.max_video_samples_per_class,
+        sample_offset=config.sample_offset
+    )
+
+    # 4) 같은 인덱스로 Subset 생성
+    train_dataset = Subset(train_full, train_idx)
+    val_dataset   = Subset(val_full,   val_idx)
     
     print(f"\nTrain: {len(train_dataset)}, Val: {len(val_dataset)}")
     print("=" * 60)
     
     # DataLoader 생성
-    train_loader = DataLoader(
-        train_dataset,
+    loader_kwargs = dict(
         batch_size=config.batch_size,
-        shuffle=True,
         num_workers=config.num_workers,
-        pin_memory=False
+        pin_memory=True,
+        persistent_workers=(config.num_workers > 0),
     )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=config.num_workers,
-        pin_memory=False
-    )
+    if config.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = 2
+
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    val_loader   = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
+
     
     # 모델 생성
     print(f"\nCreating model: {config.model_name}")

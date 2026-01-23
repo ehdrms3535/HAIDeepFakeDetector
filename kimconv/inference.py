@@ -28,110 +28,127 @@ class TestDataset(Dataset):
         self.use_face_detection = use_face_detection
         self.num_frames = num_frames
         self.image_size = image_size
-        
-        if use_face_detection:
+
+        # ✅ 멀티프로세싱/피클링 이슈 피하려면 "워커에서 lazy init"이 가장 안전
+        self.face_detector = None
+
+        # ✅ 하위폴더까지 전부 파일 수집
+        self.files = sorted([p for p in self.test_dir.rglob("*") if p.is_file()])
+
+        # 비디오 확장자
+        self.video_exts = {'.mp4', '.avi', '.mov', '.mkv'}
+
+    def _get_face_detector(self):
+        if (self.face_detector is None) and self.use_face_detection:
             self.face_detector = FaceDetector()
-        
-        # 모든 테스트 파일
-        self.files = sorted(list(self.test_dir.glob("*")))
-        
+        return self.face_detector
+
     def __len__(self):
         return len(self.files)
-    
+
     def __getitem__(self, idx):
         file_path = self.files[idx]
         file_name = file_path.name
-        
-        # 비디오 확장자
-        video_exts = ['.mp4', '.avi', '.mov', '.mkv']
-        
-        if file_path.suffix.lower() in video_exts:
+
+        if file_path.suffix.lower() in self.video_exts:
             frames = self._load_video(file_path)
         else:
             frames = self._load_image(file_path)
-        
+
         return frames, file_name
-    
-    def _load_image(self, image_path):
+
+    def _load_image(self, image_path: Path):
         """이미지 파일 로드 및 전처리"""
-        img = cv2.imread(str(image_path))
-        if img is None:
+        img_bgr = cv2.imread(str(image_path))
+        if img_bgr is None:
             return torch.zeros(1, 3, self.image_size, self.image_size)
-        
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # 얼굴 검출 (학습과 동일한 방식)
+
+        # ✅ FaceDetector는 BGR 기준으로 동작
         if self.use_face_detection:
-            img = self.face_detector.crop_face_with_fallback(
-                img,
-                target_size=(self.image_size, self.image_size)
-            )
+            fd = self._get_face_detector()
+            if fd is not None:
+                img_bgr = fd.crop_face_with_fallback(
+                    img_bgr,
+                    target_size=(self.image_size, self.image_size)
+                )
+            else:
+                img_bgr = cv2.resize(img_bgr, (self.image_size, self.image_size))
         else:
-            # 중앙 크롭 후 리사이즈
-            h, w = img.shape[:2]
+            # 중앙 크롭 후 리사이즈 (BGR 그대로 처리)
+            h, w = img_bgr.shape[:2]
             size = min(h, w)
             y1 = (h - size) // 2
             x1 = (w - size) // 2
-            img = img[y1:y1+size, x1:x1+size]
-            img = cv2.resize(img, (self.image_size, self.image_size))
-        
+            img_bgr = img_bgr[y1:y1+size, x1:x1+size]
+            img_bgr = cv2.resize(img_bgr, (self.image_size, self.image_size))
+
+        # RGB로 변환 (Albumentations는 보통 RGB 권장)
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
         # 유효성 확인
-        if not isinstance(img, np.ndarray) or len(img.shape) != 3 or img.shape[0] == 0:
+        if (not isinstance(img_rgb, np.ndarray)) or (len(img_rgb.shape) != 3) or (img_rgb.shape[0] == 0):
             return torch.zeros(1, 3, self.image_size, self.image_size)
-        
+
         # Transform
         if self.transform:
-            img = self.transform(image=img)['image']
-        
-        return img.unsqueeze(0)  # [1, C, H, W]
-    
-    def _load_video(self, video_path):
+            img_t = self.transform(image=img_rgb)['image']
+        else:
+            img_t = torch.from_numpy(img_rgb).permute(2, 0, 1).float() / 255.0
+
+        return img_t.unsqueeze(0)  # [1, C, H, W]
+
+    def _load_video(self, video_path: Path):
         """비디오에서 프레임 추출 및 전처리"""
         cap = cv2.VideoCapture(str(video_path))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        # 균등하게 프레임 선택
+
+        if total_frames <= 0:
+            cap.release()
+            return torch.zeros(1, 3, self.image_size, self.image_size)
+
+        # 균등 프레임 인덱스
         if total_frames <= self.num_frames:
             frame_indices = list(range(total_frames))
         else:
-            frame_indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
-        
+            frame_indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int).tolist()
+
         frames = []
-        for idx in frame_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ret, frame = cap.read()
-            if not ret:
+        fd = self._get_face_detector() if self.use_face_detection else None
+
+        for fi in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(fi))
+            ret, frame_bgr = cap.read()
+            if not ret or frame_bgr is None:
                 continue
-            
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # 얼굴 검출
-            if self.use_face_detection:
-                face = self.face_detector.detect_face(frame)
-                if face is not None:
-                    frame = face
-            
-            # 리사이즈 (frame이 유효한지 확인)
-            if frame is not None and isinstance(frame, np.ndarray) and frame.shape[0] > 0:
-                frame = cv2.resize(frame, (self.image_size, self.image_size))
+
+            # ✅ FaceDetector는 BGR 입력
+            if fd is not None:
+                face_bgr = fd.detect_face(frame_bgr)
+                if face_bgr is not None:
+                    frame_bgr = face_bgr
+
+            # resize
+            if isinstance(frame_bgr, np.ndarray) and frame_bgr.shape[0] > 0 and frame_bgr.shape[1] > 0:
+                frame_bgr = cv2.resize(frame_bgr, (self.image_size, self.image_size))
             else:
                 continue
-            
-            # Transform
+
+            # RGB 변환 후 transform
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
             if self.transform:
-                frame = self.transform(image=frame)['image']
-            
-            frames.append(frame)
-        
+                frame_t = self.transform(image=frame_rgb)['image']
+            else:
+                frame_t = torch.from_numpy(frame_rgb).permute(2, 0, 1).float() / 255.0
+
+            frames.append(frame_t)
+
         cap.release()
-        
+
         if len(frames) == 0:
-            # 빈 프레임 반환
-            dummy = torch.zeros(1, 3, self.image_size, self.image_size)
-            return dummy
-        
-        # [N, C, H, W]
-        return torch.stack(frames)
+            return torch.zeros(1, 3, self.image_size, self.image_size)
+
+        return torch.stack(frames, dim=0)  # [N, C, H, W]
 
 
 def inference(model_path, test_dir, output_csv, model_name="convnext_small", 

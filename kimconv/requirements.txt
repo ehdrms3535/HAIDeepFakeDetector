@@ -1,0 +1,27 @@
+# PyTorch
+torch==2.9.1
+torchvision==0.24.1
+torchaudio==2.9.1
+
+# Computer Vision
+opencv-python==4.12.0.88
+Pillow>=10.0.0
+
+# Data Processing
+numpy==2.2.6
+pandas==2.3.3
+
+# Data Augmentation
+albumentations==2.0.8
+
+# Model Library
+timm==1.0.24
+
+# Metrics
+scikit-learn==1.8.0
+
+# Progress Bar
+tqdm==4.67.1
+
+# YAML (optional, for config)
+PyYAML>=6.0

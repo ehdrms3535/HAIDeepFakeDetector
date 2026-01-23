@@ -12,11 +12,11 @@ from pathlib import Path
 @dataclass
 class Config:
     # 데이터 경로
-    image_real_dir: str = "../dataset/image/Train/Real"
-    image_fake_dir: str = "../dataset/image/Train/Fake"
-    video_real_dir: str = "../dataset/video/real"
-    video_fake_dir: str = "../dataset/video/fake"
-    
+    image_real_dir: str = "./train_data/real"
+    image_fake_dir: str = "./train_data/fake"
+    video_real_dir: str = "./train_data/real"
+    video_fake_dir: str = "./train_data/fake"
+
     # ========================================
     # 모델 경로 설정 (여기서 모델 위치 변경)
     # ========================================
@@ -35,9 +35,13 @@ class Config:
     # ========================================
     # 학습 설정 (여기서 학습 조절)
     # ========================================
-    epochs: int = 1  # ← 에포크 수: 1 epoch씩 점진적 학습
-    batch_size: int = 4  # ← 배치 크기: 한번에 처리할 이미지 수
-    num_workers: int = 0
+    epochs: int = 10  # ← 에포크 수: 1 epoch씩 점진적 학습
+    batch_size: int = 32  # ← 배치 크기: 한번에 처리할 이미지 수
+    num_workers: int = 8
+
+    pin_memory=True
+    persistent_workers=True
+    prefetch_factor=2
     
     # 옵티마이저 설정
     optimizer: str = "adamw"
@@ -53,7 +57,7 @@ class Config:
     label_smoothing: float = 0.1
     
     # Mixed Precision 설정
-    use_amp: bool = False
+    use_amp: bool = True
     gradient_clip: float = 1.0
     
     # 데이터 전처리 설정
@@ -78,22 +82,22 @@ class Config:
     # ========================================
     # 데이터 샘플링 설정 (여기서 데이터 양 조절)
     # ========================================
-    max_samples_per_class: int = 10  # ← 이미지 개수: 클래스당 10개 = Real 10개 + Fake 10개
-    max_video_samples_per_class: int = 1  # ← 비디오 개수: 클래스당 1개 = Real 1개 + Fake 1개
+    max_samples_per_class: int = 50000  # ← 이미지 개수: 클래스당 10개 = Real 10개 + Fake 10개
+    max_video_samples_per_class: int = 50000  # ← 비디오 개수: 클래스당 1개 = Real 1개 + Fake 1개
     sample_offset: int = 0  # ← 시작 위치: 0부터 시작 (다음 학습시 10, 20, 30... 으로 변경)
     use_video: bool = True  # ← 비디오 사용 여부: True=사용, False=이미지만
     
     # 기타 설정
     seed: int = 42
-    device: str = "cpu"
+    device = "cuda"
     patience: int = 3
     
     # ========================================
     # 추론 설정 (여기서 추론 경로 변경)
     # ========================================
-    inference_model_path: str = "./checkpoints/step1/best_model.pt"  # ← 추론에 사용할 모델 경로
-    test_data_dir: str = "./open/test_data"  # ← 테스트 데이터 경로
-    submission_dir: str = "./submissions/step1"  # ← 제출 파일 저장 경로
+    inference_model_path: str = "./checkpoints/model_1/best_model.pt"  # ← 추론에 사용할 모델 경로
+    test_data_dir: str = "./test_data"  # ← 테스트 데이터 경로
+    submission_dir: str = "./checkpoints/model_1/result"  # ← 제출 파일 저장 경로
     
     def __post_init__(self):
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
